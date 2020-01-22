@@ -347,7 +347,6 @@ class HassOutputter(Transformer):
         args = t.children
         # when_mqtt: "when" mqtt_message condition_clause? "do" action
         _LOGGER.debug("when_fires: %s", pprint.pformat(args))
-        name = text_from_meta(t.meta) + lines_from_meta(t.meta)
         d = MergeAll(args)
         default_domain = d.pop('_default_domain', None)
         exp = d.pop('_expansions', None)
@@ -361,9 +360,11 @@ class HassOutputter(Transformer):
                     action['entity_id'] = (service_domain +
                                            "." + action['entity_id'])
         if not exp:
+            name = "when_fires_" + d['trigger']['event_type'] + lines_from_meta(t.meta)
             output_automation_rule(d, name)
         else:
             for (i, e) in enumerate(exp):
+                name = "when_fires_" + e + lines_from_meta(t.meta)
                 new_d = copy.deepcopy(d)
                 dt = new_d['action'][0]['data_template']
                 mci = dt['media_content_id']
@@ -381,7 +382,7 @@ class HassOutputter(Transformer):
         args = t.children
         _LOGGER.debug("when - TREE: %s", t.pretty())
         _LOGGER.debug("when: %s", args)
-        name = text_from_meta(t.meta) + lines_from_meta(t.meta)
+        name = "when__" + lines_from_meta(t.meta)
         d = MergeAll(args)
         d.pop('_entity_summary', None)
         # gotta move the for clause into the trigger
@@ -389,7 +390,6 @@ class HassOutputter(Transformer):
             for_clause = d['for']
             del d['for']
             d['trigger']['for'] = for_clause
-            name += " for " + str(for_clause)
         default_domain = d.pop('_default_domain', None)
         action = d['action']
         action['service'] = service_default(
