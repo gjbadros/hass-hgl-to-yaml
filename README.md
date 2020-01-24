@@ -81,7 +81,7 @@ when: "when" entity_state for_clause? condition_clause? "do" action else_clause?
 ### power control
 ```
 power_control: ENTITY "powered_by" BRACE_EXPANDED_ENTITY
-               | /\*/ "off_at" time
+               | /*/ "off_at" time
 ```
 
 There is also a special rule "* off_at TIME" that turns off at the specified time all the media devices controlled by other power_control rules in that same file.
@@ -101,7 +101,7 @@ turn_off(light.some_light)
 alarm_control_panel.elkm1_alarm_display_message(alarm_control_panel.area_002,line1="loft",line2="door opened",timeout=0,beep=1)
 ```
 
-Actions can contain a "\*" character which gets replaced with each comma-separated brace expansion from the left-hand-side.
+Actions can contain a "*" character which gets replaced with each comma-separated brace expansion from the left-hand-side.
 
 ## Conditions
 
