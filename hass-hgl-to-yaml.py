@@ -42,7 +42,6 @@ console.setLevel(LOG_LEVEL)
 input_lines = []
 out = None
 
-
 def expand_star(expansion, text):
     return text.replace('*', expansion)
 
@@ -82,22 +81,27 @@ def text_from_meta(m):
 
 
 def lines_from_meta(m):
+    fname = args[1][0]
     if m.line == m.end_line:
-        return " (line %d)" % (m.line)
-    return " (lines %d to %d)" % (m.line, m.end_line)
+        return "%s:%d" % (fname, m.line)
+    return "%s:%d-%d" % (fname, m.line, m.end_line)
 
 
 hass_grammar = r"""
 
   start: _rule+
 
-  _rule: when             // .mwd
-       | when_mqtt
-       | when_fires
-       | when_template
-       | power_control    // .mpc
-       | time_range       // .tba
-       | mqtt_topic_designation
+  _rule_name: alias ":"
+
+  _rule: _rule_name? when             // .mwd
+       | _rule_name? when_mqtt
+       | _rule_name? when_fires
+       | _rule_name? when_template
+       | _rule_name? power_control    // .mpc
+       | _rule_name? time_range       // .tba
+       | _rule_name? mqtt_topic_designation
+
+  alias: /[_0-9a-zA-Z ]+/
 
   mqtt_topic_designation: "TOPIC" MQTT_TOPIC
 
@@ -305,8 +309,14 @@ def domain_from(entity):
 
 
 class HassOutputter(Transformer):
+
     mqtt_topic = 'vantage/misc'
     all_power_entities = []
+    last_alias = None
+
+    def __init__(self, infile, **kwargs):
+        self._infile = infile
+        super().__init__(kwargs)
 
     def mqtt_topic_designation(self, args):
         _LOGGER.debug("mqtt_topic_designation: %s", str(args[0]))
@@ -325,6 +335,9 @@ class HassOutputter(Transformer):
             new_d = copy.deepcopy(d)
             exp_msg = expand_star(e, msg)
             name = exp_msg + lines_from_meta(t.meta)
+            if self.last_alias:
+                name = "when_mqtt__" + self.last_alias
+                self.last_alias = None
             new_d['condition'] = {
                 'condition': 'template',
                 'value_template':
@@ -361,10 +374,16 @@ class HassOutputter(Transformer):
                                            "." + action['entity_id'])
         if not exp:
             name = "when_fires_" + d['trigger']['event_type'] + lines_from_meta(t.meta)
+            if self.last_alias:
+                name = "when_fires__" + self.last_alias
+                self.last_alias = None
             output_automation_rule(d, name)
         else:
             for (i, e) in enumerate(exp):
                 name = "when_fires_" + e + lines_from_meta(t.meta)
+                if self.last_alias:
+                    name = "when_fires__" + self.last_alias
+                    self.last_alias = None
                 new_d = copy.deepcopy(d)
                 dt = new_d['action'][0]['data_template']
                 mci = dt['media_content_id']
@@ -377,12 +396,20 @@ class HassOutputter(Transformer):
         output_comment()
         _LOGGER.debug("when_template: %s", args)
 
+    @v_args(inline=True)
+    def alias(self, args):
+        _LOGGER.debug("alias: %s", args)
+        self.last_alias = str(args)
+
     @v_args(tree=True)
     def when(self, t):
         args = t.children
         _LOGGER.debug("when - TREE: %s", t.pretty())
         _LOGGER.debug("when: %s", args)
         name = "when__" + lines_from_meta(t.meta)
+        if self.last_alias:
+            name = "when__" + self.last_alias
+            self.last_alias = None
         d = MergeAll(args)
         d.pop('_entity_summary', None)
         # gotta move the for clause into the trigger
@@ -453,8 +480,12 @@ class HassOutputter(Transformer):
         if args[0] == '*':
             time_off = args[1]
             # TODO: handle all entities turning off at time_off
+            name = self._infile + ' media_power all_off'
+            if self.last_alias:
+                name = "power_control_all_off__" + self.last_alias
+                self.last_alias = None
             rule_all_off = {
-                '_name': sys.argv[1] + ' media_power all_off',
+                '_name': name,
                 'trigger': {**time_off},
                 'action': {
                     'service': 'homeassistant.turn_off',
@@ -466,12 +497,16 @@ class HassOutputter(Transformer):
             media_zone = service_default('media_player', args[0])
             powered_by = service_default('switch', args[1]['entity_id'])
             result = []
+            name = media_zone
+            if self.last_alias:
+                name = "power__" + self.last_alias
+                self.last_alias = None
             state_rule_on = {'platform': 'state',
                              'entity_id': media_zone,
                              'to': 'playing',
                              'from': 'idle'}
             rule_power_on = {
-                '_name': media_zone + " turn power on",
+                '_name': "on power " + name,
                 'initial_state': True,
                 'trigger': [state_rule_on,
                             {**copy.deepcopy(state_rule_on),
@@ -489,7 +524,7 @@ class HassOutputter(Transformer):
                               'to': 'idle',
                               'for': {'minutes': 15}}
             rule_power_off = {
-                '_name': media_zone + " turn power off_at",
+                '_name': "off power " + name,
                 'initial_state': True,
                 'trigger': [state_rule_off,
                             {**copy.deepcopy(state_rule_off), 'to': 'off'}],
@@ -846,6 +881,9 @@ class HassOutputter(Transformer):
         end_action = args[4]
         end_action['action']['entity_id'] = with_entity
         name = text_from_meta(t.meta)
+        if self.last_alias:
+            name = "time_range__" + self.last_alias
+            self.last_alias = None
         when_or_while = args[3].get('_when_or_while')
         if when_or_while:
             del args[3]['_when_or_while']
@@ -920,4 +958,4 @@ if __name__ == '__main__':
             o.write("## THIS FILE WAS GENERATED BY hass-hgl-to-yaml.py\n")
             o.write("## " + " ".join(sys.argv) + "\n\n")
             out = o
-            HassOutputter(visit_tokens=True).transform(t)
+            HassOutputter(infile, visit_tokens=True).transform(t)
