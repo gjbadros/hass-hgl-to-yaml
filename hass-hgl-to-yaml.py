@@ -156,6 +156,7 @@ hass_grammar = r"""
               | "toekicks_on_mode"
               | "sunny"
               | "cloudy"
+              | "alarm_away"
 
   ?state_value: RAW_VALUE
              | "\"" QUOTED_VALUE "\""
@@ -760,9 +761,15 @@ class HassOutputter(Transformer):
                       'value_template':
                       '{{ is_state("sensor.weather_conditions", "Cloudy") '
                       'or is_state("sensor.weather_conditions", "Rainy") }}'}
+        elif args == 'alarm_away':
+            result = {'condition': 'template',
+                      'value_template':
+                      '{{ states("alarm_control_panel.area_002") == "armed_away" '
+                      ' or states("alarm_control_panel.area_002") == "armed_vacation" }}'}
         else:
             result = {'condition': 'template',
-                      'value_template': '{{ states("%s") == "1.0" }}' % args}
+                      'value_template': '{{ states("sensor.%s") == "1.0" }}'
+                      % args}
         return result
 
     def simple_entity_state(self, args):
