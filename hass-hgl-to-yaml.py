@@ -270,7 +270,6 @@ def output_automation_rule(dict, name=None):
     if name is None:
         name = dict.pop('_name', 'TODO_unique_id')
     out.write(yaml.dump([{'alias': name,
-                          'hide_entity': True,
                           'initial_state': True,
                           **dict}], sort_keys=False, width=240))
     out.write("\n")
@@ -852,7 +851,6 @@ class HassOutputter(Transformer):
         start_rule = {
             '_name': "start " + name,
             'initial_state': True,
-            'hide_entity': True,
             'trigger': {
                 **start_time
             },
@@ -861,7 +859,6 @@ class HassOutputter(Transformer):
         end_rule = {
             '_name': "end " + name,
             'initial_state': True,
-            'hide_entity': True,
             'trigger': {
                 **end_time
             },
