@@ -197,7 +197,7 @@ hass_grammar = r"""
                  | service_nvp ( "," service_nvp )*
                  | BRACE_EXPANDED_ENTITY
 
-  service_nvp: /[_0-9a-zA-Z.\*]+/ ( "=" state_value ) ?
+  service_nvp: /[_0-9a-zA-Z.\*\/]+/ ( "=" state_value ) ?
 
   BRACE_EXPANDED_WORD: /[_0-9a-zA-Z,.{}]+/
 
@@ -722,7 +722,11 @@ class HassOutputter(Transformer):
 
     def service_nvp(self, args):
         if len(args) == 2:
-            result = {str(args[0]): args[1]}
+            headings = str(args[0]).split("/", 2)
+            if len(headings) == 2:
+                result = {headings[0]: {headings[1]: args[1]}}
+            else:
+                result = {str(args[0]): args[1]}
         else:
             result = str(args[0])
         _LOGGER.debug("service_nvp: %s -> %s", args, result)
