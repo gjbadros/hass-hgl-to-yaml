@@ -334,7 +334,7 @@ class HassOutputter(Transformer):
         for (i, e) in enumerate(exp):
             new_d = copy.deepcopy(d)
             exp_msg = expand_star(e, msg)
-            name = exp_msg + lines_from_meta(t.meta)
+            name = exp_msg + '_' + lines_from_meta(t.meta)
             if self.last_alias:
                 name = "when_mqtt__" + self.last_alias
                 self.last_alias = None
@@ -373,14 +373,14 @@ class HassOutputter(Transformer):
                     action['entity_id'] = (service_domain +
                                            "." + action['entity_id'])
         if not exp:
-            name = "when_fires_" + d['trigger']['event_type'] + lines_from_meta(t.meta)
+            name = "when_fires_" + d['trigger']['event_type'] + '_' + lines_from_meta(t.meta)
             if self.last_alias:
                 name = "when_fires__" + self.last_alias
                 self.last_alias = None
             output_automation_rule(d, name)
         else:
             for (i, e) in enumerate(exp):
-                name = "when_fires_" + e + lines_from_meta(t.meta)
+                name = "when_fires_" + e + '_' + lines_from_meta(t.meta)
                 if self.last_alias:
                     name = "when_fires__" + self.last_alias
                     self.last_alias = None
@@ -419,8 +419,14 @@ class HassOutputter(Transformer):
             d['trigger']['for'] = for_clause
         default_domain = d.pop('_default_domain', None)
         action = d['action']
-        action['service'] = service_default(
-            default_domain, action['service'])
+        service_domain = domain_from(action['service'])
+        if service_domain:
+            if domain_from(action.get('entity_id', False)) is None:
+                action['entity_id'] = (service_domain +
+                                       "." + action['entity_id'])
+        else:
+            action['service'] = service_default(
+                default_domain, action['service'])
 
         else_clause = d.pop('_else', None)
         d2 = None
