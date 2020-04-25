@@ -10,6 +10,7 @@ import sys
 import re
 import copy
 import yaml
+import collections
 import logging
 import pprint
 import argparse
@@ -41,6 +42,23 @@ console.setLevel(LOG_LEVEL)
 
 input_lines = []
 out = None
+
+# From https://gist.github.com/angstwad/bf22d1822c38a92ec0a9
+def dict_merge(dct, merge_dct):
+    """ Recursive dict merge. Inspired by :meth:``dict.update()``, instead of
+    updating only top-level keys, dict_merge recurses down into dicts nested
+    to an arbitrary depth, updating keys. The ``merge_dct`` is merged into
+    ``dct``.
+    :param dct: dict onto which the merge is executed
+    :param merge_dct: dct merged into dct
+    :return: None
+    """
+    for k, v in merge_dct.items():
+        if (k in dct and isinstance(dct[k], dict)
+                and isinstance(merge_dct[k], collections.Mapping)):
+            dict_merge(dct[k], merge_dct[k])
+        else:
+            dct[k] = merge_dct[k]
 
 def expand_star(expansion, text):
     return text.replace('*', expansion)
@@ -80,11 +98,19 @@ def text_from_meta(m):
     return input_lines[m.line-1][m.column-1:ec]
 
 
+def shorten_fname(fname):
+    fname = re.sub(r'(?i)\.hgl$', '', fname)
+    fname = re.sub(r'([^-])([^-]+)-?', lambda m: m.group(1) + '-', fname)
+    fname = re.sub(r'-$', '', fname)
+    return fname
+
+
 def lines_from_meta(m):
     fname = args[1][0]
+    fn = shorten_fname(fname)
     if m.line == m.end_line:
-        return "%s:%d" % (fname, m.line)
-    return "%s:%d-%d" % (fname, m.line, m.end_line)
+        return "%s:%d" % (fn, m.line)
+    return "%s:%d-%d" % (fn, m.line, m.end_line)
 
 
 hass_grammar = r"""
@@ -336,7 +362,7 @@ class HassOutputter(Transformer):
             exp_msg = expand_star(e, msg)
             name = exp_msg + '_' + lines_from_meta(t.meta)
             if self.last_alias:
-                name = "when_mqtt__" + self.last_alias
+                name = "wmqtt_" + self.last_alias
                 self.last_alias = None
             new_d['condition'] = {
                 'condition': 'template',
@@ -373,16 +399,16 @@ class HassOutputter(Transformer):
                     action['entity_id'] = (service_domain +
                                            "." + action['entity_id'])
         if not exp:
-            name = "when_fires_" + d['trigger']['event_type'] + '_' + lines_from_meta(t.meta)
+            name = "wfires_" + d['trigger']['event_type'] + '_' + lines_from_meta(t.meta)
             if self.last_alias:
-                name = "when_fires__" + self.last_alias
+                name = "wfires_" + self.last_alias
                 self.last_alias = None
             output_automation_rule(d, name)
         else:
             for (i, e) in enumerate(exp):
-                name = "when_fires_" + e + '_' + lines_from_meta(t.meta)
+                name = "wfires_" + e + '_' + lines_from_meta(t.meta)
                 if self.last_alias:
-                    name = "when_fires__" + self.last_alias
+                    name = "wfires_" + self.last_alias
                     self.last_alias = None
                 new_d = copy.deepcopy(d)
                 dt = new_d['action'][0]['data_template']
@@ -406,9 +432,9 @@ class HassOutputter(Transformer):
         args = t.children
         _LOGGER.debug("when - TREE: %s", t.pretty())
         _LOGGER.debug("when: %s", args)
-        name = "when__" + lines_from_meta(t.meta)
+        name = "when_" + lines_from_meta(t.meta)
         if self.last_alias:
-            name = "when__" + self.last_alias
+            name = "when_" + self.last_alias
             self.last_alias = None
         d = MergeAll(args)
         d.pop('_entity_summary', None)
@@ -750,11 +776,11 @@ class HassOutputter(Transformer):
             elif not isinstance(a, dict):
                 entities.append(a)
             else:
-                others = {**others, **a}
+                dict_merge(others, a) #{**others, **a}
         result = {}
         if len(entities) > 0:
             result['entity_id'] = ",".join(entities)
-        if len(others) > 0:
+        if others and len(others) > 0:
             result['data'] = others
         _LOGGER.debug("service_params: %s -> %s", args, result)
         return result
