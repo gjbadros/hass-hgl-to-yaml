@@ -43,6 +43,15 @@ console.setLevel(LOG_LEVEL)
 input_lines = []
 out = None
 
+
+def RepresentsInt(s):
+    try:
+        int(s)
+        return True
+    except ValueError:
+        return False
+
+
 # From https://gist.github.com/angstwad/bf22d1822c38a92ec0a9
 def dict_merge(dct, merge_dct):
     """ Recursive dict merge. Inspired by :meth:``dict.update()``, instead of
@@ -638,7 +647,11 @@ class HassOutputter(Transformer):
         return result
 
     def RAW_VALUE(self, val):
-        return str(val)
+        answer = str(val)
+        if RepresentsInt(answer):
+            return int(answer)
+        else:
+            return answer
 
     def ATTRIBUTE(self, val):
         return str(val)
