@@ -69,10 +69,28 @@ def dict_merge(dct, merge_dct):
         else:
             dct[k] = merge_dct[k]
 
+
 def expand_star(expansion, text):
     return text.replace('*', expansion)
 
 
+def expand_star_dict(expansion, d):
+    answer = {}
+    for (k, v) in d.items():
+        if type(v) is dict:
+            answer[k] = expand_star_dict(expansion, v)
+        else:
+            answer[k] = expand_star(expansion, v)
+    return answer
+
+
+def uses_expansion(others):
+    for (k, v) in others.items():
+        if type(v) == 'string' and v.find("{{") >= 0 and v.find("}}") >= 0:
+            return True
+    return False
+
+                                        
 def media_cleanups(service):
     service = service.replace('media_volume', 'volume')
     service = service.replace('channel_down', 'next_track')
@@ -167,8 +185,10 @@ hass_grammar = r"""
                         | multiple_entity_state
                         | condis_entity_state
 
-  simple_entity_state: BRACE_EXPANDED_ENTITY ("is"|"==") state_value [ "with" with_attr_clause ] ( "and" with_attr_clause ) *
+  simple_entity_state: BRACE_EXPANDED_ENTITY ("is"|"==") state_value ["from" from_attr_clause ] [ "with" with_attr_clause ] ( "and" with_attr_clause ) *
 
+  from_attr_clause: state_value
+  
   with_attr_clause: "*." ATTRIBUTE "==" state_value
 
   ATTRIBUTE: /[_a-zA-Z][_0-9a-zA-Z]*/
@@ -188,18 +208,24 @@ hass_grammar = r"""
   entity_conjunction: ENTITY ( "and" ENTITY )+
 
   GLOBAL_STATE: "nighttime_dark_mode"
-              | "toekicks_on_mode"
+              | "toekicks_nighttime_mode"
+              | "camect_events_enabled"
+              | "on_vacation"
+              | "babysitter_mode"
+              | "ms_between_sleep_and_morning"
               | "sunny"
               | "cloudy"
               | "alarm_away"
 
   ?state_value: RAW_VALUE
-             | "\"" QUOTED_VALUE "\""
-             | "'" QUOTED_VALUE "'"
+             | "\"" DOUBLE_QUOTED_VALUE "\""
+             | "'" SINGLE_QUOTED_VALUE "'"
 
   RAW_VALUE: /[_0-9a-zA-Z.]+/
 
-  QUOTED_VALUE: /[^"'\n]+/
+  DOUBLE_QUOTED_VALUE: /[^"\n]+/
+
+  SINGLE_QUOTED_VALUE: /[^'\n]+/
 
   DOMAIN: /[_0-9a-zA-Z]+/
 
@@ -511,6 +537,10 @@ class HassOutputter(Transformer):
                 action['service'] = expand_star(e, action['service'])
                 if action.get('entity_id'):
                     action['entity_id'] = expand_star(e, action['entity_id'])
+                if action.get('data'):
+                    action['data'] = expand_star_dict(e, action['data'])
+                elif action.get('data_template'):
+                    action['data_template'] = expand_star_dict(e, action['data_template'])
                 output_automation_rule(new_d, name + " #" + str(i))
                 if d2:
                     new_d2 = copy.deepcopy(d2)
@@ -656,7 +686,10 @@ class HassOutputter(Transformer):
     def ATTRIBUTE(self, val):
         return str(val)
 
-    def QUOTED_VALUE(self, val):
+    def DOUBLE_QUOTED_VALUE(self, val):
+        return str(val)
+
+    def SINGLE_QUOTED_VALUE(self, val):
         return str(val)
 
     @v_args(inline=True)
@@ -794,7 +827,10 @@ class HassOutputter(Transformer):
         if len(entities) > 0:
             result['entity_id'] = ",".join(entities)
         if others and len(others) > 0:
-            result['data'] = others
+            if uses_expansion(others):
+                result['data_template'] = others
+            else:
+                result['data'] = others
         _LOGGER.debug("service_params: %s -> %s", args, result)
         return result
 
@@ -816,12 +852,14 @@ class HassOutputter(Transformer):
                       ' or states("alarm_control_panel.area_002") == "armed_vacation" }}'}
         else:
             result = {'condition': 'template',
-                      'value_template': '{{ states("sensor.%s") == "1.0" }}'
+                      'value_template': '{{ is_state("switch.%s", "true") }}'
                       % args}
         return result
 
     def simple_entity_state(self, args):
         result = {**args[0], 'to': args[1]}
+        if len(args) > 2 and type(args[2]) is dict:
+            result = {**result, **args.pop(2)}
         if len(args) > 2:
             entity = args[0].get('entity_id')
             c = {}
@@ -833,6 +871,10 @@ class HassOutputter(Transformer):
             c['value_template'] = vt
             _LOGGER.debug("simple_entity_state: %s -> %s", args, result)
         return result
+
+    def from_attr_clause(self, args):
+        _LOGGER.debug("from_attr_clause: %s", args)
+        return {'from': args[0]}
 
     def with_attr_clause(self, args):
         _LOGGER.debug("with_attr_clause: %s", args)
@@ -879,8 +921,11 @@ class HassOutputter(Transformer):
             args[0]['entity_id'] = service_default(
                 'sensor', args[0]['entity_id'])
         to_state = args[0].pop('to', None)
+        from_state = args[0].pop('from', None)
         if to_state:
             args[0]['state'] = to_state
+#        if from_state:
+#            args[0]['state'] = {**args[0], **(from_state['from']['from'])}
         or_vals = args[0].get('_template_or')
         and_vals = args[0].get('_template_and')
         is_val = args[0].get('_template_is')
