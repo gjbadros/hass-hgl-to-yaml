@@ -1036,7 +1036,7 @@ if __name__ == '__main__':
     if not infile:
         exit(-1)
 
-    if infile.lower().index(".yaml") > 0:
+    if infile.lower().find(".yaml") > 0:
         _LOGGER.error("Processing a .yaml extension file when expecting .hgl")
         exit(-1)
 
