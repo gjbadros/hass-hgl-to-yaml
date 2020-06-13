@@ -197,7 +197,7 @@ hass_grammar = r"""
                  | service_nvp ( "," service_nvp )*
                  | BRACE_EXPANDED_ENTITY
 
-  service_nvp: /[_0-9a-zA-Z.\*]+/ ( "=" state_value ) ?
+  service_nvp: /[_0-9a-zA-Z.\*\/]+/ ( "=" state_value ) ?
 
   BRACE_EXPANDED_WORD: /[_0-9a-zA-Z,.{}]+/
 
@@ -940,6 +940,10 @@ if __name__ == '__main__':
     infile = args[1][0]
 
     if not infile:
+        exit(-1)
+
+    if infile.lower().index(".yaml") > 0:
+        _LOGGER.error("Processing a .yaml extension file when expecting .hgl")
         exit(-1)
 
     dump = False
