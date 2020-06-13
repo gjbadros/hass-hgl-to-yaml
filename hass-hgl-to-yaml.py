@@ -10,6 +10,7 @@ import sys
 import re
 import copy
 import yaml
+import collections
 import logging
 import pprint
 import argparse
@@ -42,10 +43,54 @@ console.setLevel(LOG_LEVEL)
 input_lines = []
 out = None
 
+
+def RepresentsInt(s):
+    try:
+        int(s)
+        return True
+    except ValueError:
+        return False
+
+
+# From https://gist.github.com/angstwad/bf22d1822c38a92ec0a9
+def dict_merge(dct, merge_dct):
+    """ Recursive dict merge. Inspired by :meth:``dict.update()``, instead of
+    updating only top-level keys, dict_merge recurses down into dicts nested
+    to an arbitrary depth, updating keys. The ``merge_dct`` is merged into
+    ``dct``.
+    :param dct: dict onto which the merge is executed
+    :param merge_dct: dct merged into dct
+    :return: None
+    """
+    for k, v in merge_dct.items():
+        if (k in dct and isinstance(dct[k], dict)
+                and isinstance(merge_dct[k], collections.Mapping)):
+            dict_merge(dct[k], merge_dct[k])
+        else:
+            dct[k] = merge_dct[k]
+
+
 def expand_star(expansion, text):
     return text.replace('*', expansion)
 
 
+def expand_star_dict(expansion, d):
+    answer = {}
+    for (k, v) in d.items():
+        if type(v) is dict:
+            answer[k] = expand_star_dict(expansion, v)
+        else:
+            answer[k] = expand_star(expansion, v)
+    return answer
+
+
+def uses_expansion(others):
+    for (k, v) in others.items():
+        if type(v) == 'string' and v.find("{{") >= 0 and v.find("}}") >= 0:
+            return True
+    return False
+
+                                        
 def media_cleanups(service):
     service = service.replace('media_volume', 'volume')
     service = service.replace('channel_down', 'next_track')
@@ -80,11 +125,19 @@ def text_from_meta(m):
     return input_lines[m.line-1][m.column-1:ec]
 
 
+def shorten_fname(fname):
+    fname = re.sub(r'(?i)\.hgl$', '', fname)
+    fname = re.sub(r'([^-])([^-]+)-?', lambda m: m.group(1) + '-', fname)
+    fname = re.sub(r'-$', '', fname)
+    return fname
+
+
 def lines_from_meta(m):
     fname = args[1][0]
+    fn = shorten_fname(fname)
     if m.line == m.end_line:
-        return "%s:%d" % (fname, m.line)
-    return "%s:%d-%d" % (fname, m.line, m.end_line)
+        return "%s:%d" % (fn, m.line)
+    return "%s:%d-%d" % (fn, m.line, m.end_line)
 
 
 hass_grammar = r"""
@@ -132,8 +185,10 @@ hass_grammar = r"""
                         | multiple_entity_state
                         | condis_entity_state
 
-  simple_entity_state: BRACE_EXPANDED_ENTITY ("is"|"==") state_value [ "with" with_attr_clause ] ( "and" with_attr_clause ) *
+  simple_entity_state: BRACE_EXPANDED_ENTITY ("is"|"==") state_value ["from" from_attr_clause ] [ "with" with_attr_clause ] ( "and" with_attr_clause ) *
 
+  from_attr_clause: state_value
+  
   with_attr_clause: "*." ATTRIBUTE "==" state_value
 
   ATTRIBUTE: /[_a-zA-Z][_0-9a-zA-Z]*/
@@ -153,18 +208,24 @@ hass_grammar = r"""
   entity_conjunction: ENTITY ( "and" ENTITY )+
 
   GLOBAL_STATE: "nighttime_dark_mode"
-              | "toekicks_on_mode"
+              | "toekicks_nighttime_mode"
+              | "camect_events_enabled"
+              | "on_vacation"
+              | "babysitter_mode"
+              | "ms_between_sleep_and_morning"
               | "sunny"
               | "cloudy"
               | "alarm_away"
 
   ?state_value: RAW_VALUE
-             | "\"" QUOTED_VALUE "\""
-             | "'" QUOTED_VALUE "'"
+             | "\"" DOUBLE_QUOTED_VALUE "\""
+             | "'" SINGLE_QUOTED_VALUE "'"
 
   RAW_VALUE: /[_0-9a-zA-Z.]+/
 
-  QUOTED_VALUE: /[^"'\n]+/
+  DOUBLE_QUOTED_VALUE: /[^"\n]+/
+
+  SINGLE_QUOTED_VALUE: /[^'\n]+/
 
   DOMAIN: /[_0-9a-zA-Z]+/
 
@@ -334,9 +395,9 @@ class HassOutputter(Transformer):
         for (i, e) in enumerate(exp):
             new_d = copy.deepcopy(d)
             exp_msg = expand_star(e, msg)
-            name = exp_msg + lines_from_meta(t.meta)
+            name = exp_msg + '_' + lines_from_meta(t.meta)
             if self.last_alias:
-                name = "when_mqtt__" + self.last_alias
+                name = "wmqtt_" + self.last_alias
                 self.last_alias = None
             new_d['condition'] = {
                 'condition': 'template',
@@ -373,16 +434,16 @@ class HassOutputter(Transformer):
                     action['entity_id'] = (service_domain +
                                            "." + action['entity_id'])
         if not exp:
-            name = "when_fires_" + d['trigger']['event_type'] + lines_from_meta(t.meta)
+            name = "wfires_" + d['trigger']['event_type'] + '_' + lines_from_meta(t.meta)
             if self.last_alias:
-                name = "when_fires__" + self.last_alias
+                name = "wfires_" + self.last_alias
                 self.last_alias = None
             output_automation_rule(d, name)
         else:
             for (i, e) in enumerate(exp):
-                name = "when_fires_" + e + lines_from_meta(t.meta)
+                name = "wfires_" + e + '_' + lines_from_meta(t.meta)
                 if self.last_alias:
-                    name = "when_fires__" + self.last_alias
+                    name = "wfires_" + self.last_alias
                     self.last_alias = None
                 new_d = copy.deepcopy(d)
                 dt = new_d['action'][0]['data_template']
@@ -406,9 +467,9 @@ class HassOutputter(Transformer):
         args = t.children
         _LOGGER.debug("when - TREE: %s", t.pretty())
         _LOGGER.debug("when: %s", args)
-        name = "when__" + lines_from_meta(t.meta)
+        name = "when_" + lines_from_meta(t.meta)
         if self.last_alias:
-            name = "when__" + self.last_alias
+            name = "when_" + self.last_alias
             self.last_alias = None
         d = MergeAll(args)
         d.pop('_entity_summary', None)
@@ -419,8 +480,14 @@ class HassOutputter(Transformer):
             d['trigger']['for'] = for_clause
         default_domain = d.pop('_default_domain', None)
         action = d['action']
-        action['service'] = service_default(
-            default_domain, action['service'])
+        service_domain = domain_from(action['service'])
+        if service_domain:
+            if domain_from(action.get('entity_id', False)) is None:
+                action['entity_id'] = (service_domain +
+                                       "." + action['entity_id'])
+        else:
+            action['service'] = service_default(
+                default_domain, action['service'])
 
         else_clause = d.pop('_else', None)
         d2 = None
@@ -470,6 +537,10 @@ class HassOutputter(Transformer):
                 action['service'] = expand_star(e, action['service'])
                 if action.get('entity_id'):
                     action['entity_id'] = expand_star(e, action['entity_id'])
+                if action.get('data'):
+                    action['data'] = expand_star_dict(e, action['data'])
+                elif action.get('data_template'):
+                    action['data_template'] = expand_star_dict(e, action['data_template'])
                 output_automation_rule(new_d, name + " #" + str(i))
                 if d2:
                     new_d2 = copy.deepcopy(d2)
@@ -606,12 +677,19 @@ class HassOutputter(Transformer):
         return result
 
     def RAW_VALUE(self, val):
-        return str(val)
+        answer = str(val)
+        if RepresentsInt(answer):
+            return int(answer)
+        else:
+            return answer
 
     def ATTRIBUTE(self, val):
         return str(val)
 
-    def QUOTED_VALUE(self, val):
+    def DOUBLE_QUOTED_VALUE(self, val):
+        return str(val)
+
+    def SINGLE_QUOTED_VALUE(self, val):
         return str(val)
 
     @v_args(inline=True)
@@ -722,7 +800,11 @@ class HassOutputter(Transformer):
 
     def service_nvp(self, args):
         if len(args) == 2:
-            result = {str(args[0]): args[1]}
+            headings = str(args[0]).split("/", 2)
+            if len(headings) == 2:
+                result = {headings[0]: {headings[1]: args[1]}}
+            else:
+                result = {str(args[0]): args[1]}
         else:
             result = str(args[0])
         _LOGGER.debug("service_nvp: %s -> %s", args, result)
@@ -740,12 +822,15 @@ class HassOutputter(Transformer):
             elif not isinstance(a, dict):
                 entities.append(a)
             else:
-                others = {**others, **a}
+                dict_merge(others, a) #{**others, **a}
         result = {}
         if len(entities) > 0:
             result['entity_id'] = ",".join(entities)
-        if len(others) > 0:
-            result['data'] = others
+        if others and len(others) > 0:
+            if uses_expansion(others):
+                result['data_template'] = others
+            else:
+                result['data'] = others
         _LOGGER.debug("service_params: %s -> %s", args, result)
         return result
 
@@ -767,12 +852,14 @@ class HassOutputter(Transformer):
                       ' or states("alarm_control_panel.area_002") == "armed_vacation" }}'}
         else:
             result = {'condition': 'template',
-                      'value_template': '{{ states("sensor.%s") == "1.0" }}'
+                      'value_template': '{{ is_state("switch.%s", "true") }}'
                       % args}
         return result
 
     def simple_entity_state(self, args):
         result = {**args[0], 'to': args[1]}
+        if len(args) > 2 and type(args[2]) is dict:
+            result = {**result, **args.pop(2)}
         if len(args) > 2:
             entity = args[0].get('entity_id')
             c = {}
@@ -784,6 +871,10 @@ class HassOutputter(Transformer):
             c['value_template'] = vt
             _LOGGER.debug("simple_entity_state: %s -> %s", args, result)
         return result
+
+    def from_attr_clause(self, args):
+        _LOGGER.debug("from_attr_clause: %s", args)
+        return {'from': args[0]}
 
     def with_attr_clause(self, args):
         _LOGGER.debug("with_attr_clause: %s", args)
@@ -830,8 +921,11 @@ class HassOutputter(Transformer):
             args[0]['entity_id'] = service_default(
                 'sensor', args[0]['entity_id'])
         to_state = args[0].pop('to', None)
+        from_state = args[0].pop('from', None)
         if to_state:
             args[0]['state'] = to_state
+#        if from_state:
+#            args[0]['state'] = {**args[0], **(from_state['from']['from'])}
         or_vals = args[0].get('_template_or')
         and_vals = args[0].get('_template_and')
         is_val = args[0].get('_template_is')
