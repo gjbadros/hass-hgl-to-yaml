@@ -86,7 +86,7 @@ def expand_star_dict(expansion, d):
 
 def uses_expansion(others):
     for (k, v) in others.items():
-        if type(v) == 'string' and v.find("{{") >= 0 and v.find("}}") >= 0:
+        if type(v) == str and v.find("{{") >= 0 and v.find("}}") >= 0:
             return True
     return False
 
@@ -147,6 +147,7 @@ hass_grammar = r"""
   _rule_name: alias ":"
 
   _rule: _rule_name? when             // .mwd
+       | _rule_name? when_state_changes
        | _rule_name? when_mqtt
        | _rule_name? when_fires
        | _rule_name? when_template
@@ -163,6 +164,8 @@ hass_grammar = r"""
   when_mqtt: "when" mqtt_message [condition_clause] "do" action
 
   when_fires: "when" event "fires" condition_clause? "do" action
+
+  when_state_changes: "when" BRACE_EXPANDED_ENTITY "changes" "do" action
 
   // entity_state may braceexpand into multiple separate rules
   // entity_state's entity_id defaults to sensor._
@@ -461,6 +464,53 @@ class HassOutputter(Transformer):
     def alias(self, args):
         _LOGGER.debug("alias: %s", args)
         self.last_alias = str(args)
+
+    @v_args(tree=True)
+    def when_state_changes(self, t):
+        args = t.children
+        _LOGGER.debug("when - TREE: %s", t.pretty())
+        _LOGGER.debug("when: %s", args)
+        name = "when_" + lines_from_meta(t.meta)
+        if self.last_alias:
+            name = "when_" + self.last_alias
+            self.last_alias = None
+        d = MergeAll(args)
+        del d['entity_id']
+        _LOGGER.debug("d = %s", d)
+        d['trigger'] = { 'platform': 'state', **args[0] }
+        default_domain = d.pop('_default_domain', None)
+        action = d['action']
+        service_domain = domain_from(action['service'])
+        if service_domain:
+            if domain_from(action.get('entity_id', False)) is None:
+                action['entity_id'] = (service_domain +
+                                       "." + action['entity_id'])
+        else:
+            action['service'] = service_default(
+                default_domain, action['service'])
+        exp = d['trigger'].pop('_expansions', None)
+        if not exp:
+            output_automation_rule(d, name)
+            return
+        else:
+            entity_wc = d['trigger'].pop('_entity_id_wc', None)
+            for (i, e) in enumerate(exp):
+                new_d = copy.deepcopy(d)
+                entity = service_default('sensor', expand_star(e, entity_wc))
+                new_d['trigger']['entity_id'] = entity
+                action = new_d['action']
+                action['service'] = expand_star(e, action['service'])
+                if action.get('entity_id'):
+                    action['entity_id'] = expand_star(e, action['entity_id'])
+                if action.get('data'):
+                    action['data'] = expand_star_dict(e, action['data'])
+                elif action.get('data_template'):
+                    action['data_template'] = expand_star_dict(e, action['data_template'])
+                output_automation_rule(new_d, name + " #" + str(i))
+                if d2:
+                    new_d2 = copy.deepcopy(d2)
+                    new_d2['trigger']['entity_id'] = entity
+                    output_automation_rule(new_d2, else_name + " #" + str(i))
 
     @v_args(tree=True)
     def when(self, t):
