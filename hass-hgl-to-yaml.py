@@ -412,8 +412,8 @@ class HassOutputter(Transformer):
             service_domain = domain_from(action['service'])
             if service_domain:
                 if domain_from(action.get('entity_id', False)) is None:
-                    action['entity_id'] = (service_domain +
-                                           "." + action['entity_id'])
+                    new_eis = [ service_domain +  "."  + ei for ei in action['entity_id'].split(',') ]
+                    action['entity_id'] = ",".join(new_eis)
             else:
                 action['service'] = service_default(
                     default_domain, action['service'])
@@ -434,8 +434,8 @@ class HassOutputter(Transformer):
             service_domain = domain_from(action['service'])
             if service_domain:
                 if domain_from(action.get('entity_id', False)) is None:
-                    action['entity_id'] = (service_domain +
-                                           "." + action['entity_id'])
+                    new_eis = [ service_domain +  "."  + ei for ei in action['entity_id'].split(',') ]
+                    action['entity_id'] = ",".join(new_eis)
         if not exp:
             name = "wfires_" + d['trigger']['event_type'] + '_' + lines_from_meta(t.meta)
             if self.last_alias:
