@@ -641,14 +641,13 @@ class HassOutputter(Transformer):
             }
             state_rule_off = {'platform': 'state',
                               'entity_id': media_zone,
-                              'from': 'playing',
-                              'to': 'idle',
+                              'from': ['playing', 'paused'],
+                              'to': ['idle', 'off'],
                               'for': {'minutes': 15}}
             rule_power_off = {
                 '_name': "off power " + name,
                 'initial_state': True,
-                'trigger': [state_rule_off,
-                            {**copy.deepcopy(state_rule_off), 'to': 'off'}],
+                'trigger': [state_rule_off],
                 'action': {
                     'service': 'homeassistant.turn_off',
                     'entity_id': powered_by
