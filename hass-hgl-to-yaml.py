@@ -2,7 +2,7 @@
 # Copyright (C) 2019 Greg J. Badros <badros@gmail.com>
 # Distributed under the MIT License -- Use at your own risk!
 #
-# pip3 install lark-parser
+# pip3 install lark-parser==0.11 #0.12 does *not* work
 # pip3 install braceexpand
 
 from lark import Lark, Transformer, v_args
