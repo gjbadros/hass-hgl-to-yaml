@@ -624,16 +624,12 @@ class HassOutputter(Transformer):
                 self.last_alias = None
             state_rule_on = {'platform': 'state',
                              'entity_id': media_zone,
-                             'to': 'playing',
-                             'from': 'idle'}
+                             'to': ['playing', 'buffering'],
+                             'from': ['idle', 'off', 'paused']}
             rule_power_on = {
                 '_name': "on power " + name,
                 'initial_state': True,
-                'trigger': [state_rule_on,
-                            {**copy.deepcopy(state_rule_on),
-                             'from': 'off'},
-                            {**copy.deepcopy(state_rule_on),
-                             'from': 'paused'}],
+                'trigger': [state_rule_on],
                 'action': {
                     'service': 'homeassistant.turn_on',
                     'entity_id': powered_by
